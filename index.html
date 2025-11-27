@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KPI 計算</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIiB2aWV3Qm94PSIwIDAgMjAwIDIwMCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJLUEkg5LiA5Y-w5b2uIEFwcCBJY29uIC0g77yBIuKAnCI+PHN0eWxlPi5iZyB7ZmlsbDogIzU4Nzc1ZTt9IC5saW5lIHtmaWxsOm5vbmU7IHN0cm9rZTogI2ZmZmZmZjsgc3Ryb2tlLXdpZHRoOiA2OyBzdHJva2UtbGluZWNhcDogcm91bmQ7IHN0cm9rZS1saW5lam9pbjogcm91bmQ7fS5hcnJvdyB7ZmlsbDogI2U3ZDRiMTt9PC9zdHlsZT48cmVjdCB4PSIxMCIgeT0iMTAiIHdpZHRoPSIxODAiIGhlaWdodD0iMTgwIiByeD0iNDAiIHJ5PSI0MCIgY2xhc3M9ImJnIi8+PHBvbHlsaW5lIHBvaW50cz0iNjAsMTQwIDgwLDEwMCAxMDAsMTIwIDEyMCw4MCAxNDAsMTAwIiBjbGFzcz0ibGluZSIvPjxwb2x5Z29uIHBvaW50cz0iMTQwLDc1IDE1MCw5MCAxMzAsOTAiIGNsYXNzPSJhcnJvdyIvPjwvc3ZnPg==">
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+    body { margin:0; padding:20px; background:#fff; color:#333; display:flex; justify-content:center; }
+    .container { width:100%; max-width:900px; text-align:center; }
+    h1 { color:#58775e; margin-bottom:16px; font-size:28px; }
+    label{ display:block; text-align:left; margin-bottom:6px; color:#444; font-weight:600;}
+    select, input, button { width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; font-size:16px; }
+    table { width:100%; border-collapse:collapse; margin-top:18px; }
+    th, td { border:1px solid #ddd; padding:10px; font-size:14px; text-align:left; vertical-align:top; }
+    th { background:#e7d4b1; font-weight:700; }
+    .stats-box { margin-top:20px; padding:16px; border-radius:10px; background:#f9f9f9; border:1px solid #eee; text-align:left; }
+    .stats-title { color:#58775e; font-weight:700; font-size:18px; margin-bottom:8px; }
+    .highlight-number { color:#58775e; font-weight:700; font-size:20px; }
+    .urgent { color:#58775e; font-weight:700; }
+    .not-urgent { color:#666; }
+    .error { color:#d9534f; font-weight:700; }
+    @media(max-width:600px){ th, td { font-size:13px; padding:8px; } h1{font-size:22px;} }
+  </style>
+</head>
+<body>
+  <div class="container" role="main">
+    <h1>KPI 計算</h1>
+
+    <!-- 全期間比重破題區 -->
+    <div id="weightStats" class="stats-box" style="display:none;">
+      <div class="stats-title">全期間項目比重</div>
+      <ul id="weightList"></ul>
+    </div>
+
+    <label for="monthSelect">選擇月份</label>
+    <select id="monthSelect" aria-label="選擇月份">
+      <option value="">載入中...</option>
+    </select>
+
+    <table aria-label="KPI 表格">
+      <thead>
+        <tr>
+          <th>月份</th>
+          <th>項目</th>
+          <th>項目內容</th>
+          <th>發需求日</th>
+          <th>截止日</th>
+          <th>備註</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+
+    <div id="stats" class="stats-box" style="display:none;">
+      <div class="stats-title">統計結果</div>
+      <p><span id="statsMonthText"></span>，共完成 <span id="statsCount" class="highlight-number"></span> 個項目</p>
+      <p>說明：</p>
+      <ul id="statsList"></ul>
+    </div>
+  </div>
+
+  <script>
+    const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRKYXGypihc1-yGaCQE3N6BaiICHk2Ko3OCHR6MFvG9_AqDOL9gs0u6hbYMSWKu9Ztru4zRcTTSQdHl/pub?output=csv";
+    let allData = [];
+
+    async function loadCSV() {
+      try {
+        const res = await fetch(CSV_URL);
+        const txt = await res.text();
+
+        const rawRows = txt.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter(Boolean);
+        const headerLine = rawRows.shift();
+        const headers = headerLine.split(",").map(h => cleanHeader(h));
+        const rows = rawRows.map(r => r.split(","));
+
+        allData = rows.map(row => {
+          let obj = {};
+          row.forEach((v,i) => {
+            const key = headers[i] || `col_${i}`;
+            obj[key] = v !== undefined ? cleanValue(v) : "";
+          });
+          return obj;
+        });
+
+        populateMonthOptions();
+        renderWeightStats();
+      } catch(err) {
+        console.error("CSV 讀取失敗：", err);
+        alert("CSV 讀取失敗，請檢查網址或網路。");
+      }
+    }
+
+    function cleanHeader(h) {
+      if (!h && h !== "") return h;
+      let s = String(h).replace(/^\uFEFF/, "").replace(/\u3000/g," ").replace(/\s+/g," ").trim();
+      return s;
+    }
+
+    function cleanValue(v) {
+      if (v === undefined || v === null) return "";
+      let s = String(v).replace(/\u3000/g," ").trim();
+      if (s.startsWith('"') && s.endsWith('"')) s = s.slice(1,-1);
+      return s;
+    }
+
+    function populateMonthOptions() {
+      const monthSelect = document.getElementById("monthSelect");
+      const months = [...new Set(allData.map(row => row["月份"] || row["月"] || row["month"]).filter(Boolean))];
+      monthSelect.innerHTML = `<option value="">請選擇月份</option>`;
+      months.forEach(m => monthSelect.innerHTML += `<option value="${m}">${m}</option>`);
+    }
+
+    function parseDateSmart(input) {
+      if (!input && input !== 0) return null;
+      let s = String(input).trim().replace(/^\uFEFF/,"").replace(/\u3000/g," ");
+      if (/[年月日]/.test(s)) s = s.replace(/[年月]/g,"-").replace(/日/g,"").replace(/\s+/g,"");
+      const nums = s.match(/\d+/g);
+      if (!nums) { const d = new Date(s); return isNaN(d.getTime())?null:d; }
+      let y,m,d;
+      if (nums.length>=3){
+        if(nums[0].length===4){ y=parseInt(nums[0],10); m=parseInt(nums[1],10); d=parseInt(nums[2],10); }
+        else if(nums[2].length===4){ y=parseInt(nums[2],10); m=parseInt(nums[0],10); d=parseInt(nums[1],10); }
+        else{ y=parseInt(nums[0],10); m=parseInt(nums[1],10)||1; d=parseInt(nums[2],10)||1; }
+        const date = new Date(Date.UTC(y,Math.max(0,m-1),Math.max(1,d)));
+        if(!isNaN(date.getTime())) return date;
+      }
+      const fallback = new Date(s);
+      return isNaN(fallback.getTime())?null:fallback;
+    }
+
+    function isUrgent(startStr,endStr){
+      const start=parseDateSmart(startStr), end=parseDateSmart(endStr);
+      if(!start || !end) return " ";
+      const diff=(end.getTime()-start.getTime())/(24*60*60*1000);
+      if(diff<0) return " ";
+      return diff<7?"急件":" ";
+    }
+
+    function renderTable(month){
+      const tbody=document.getElementById("tableBody");
+      tbody.innerHTML="";
+      const filtered=allData.filter(d=>(d["月份"]||d["月"]||d["month"])===month);
+      filtered.forEach(row=>{
+        const proj=row["項目"]||row["項目名稱"]||row["Project"]||"";
+        const content=row["項目內容"]||row["內容"]||row["描述"]||"";
+        const start=row["發需求日"]||row["發佈日"]||row["start"]||"";
+        const end=row["截止日"]||row["截止"]||row["end"]||"";
+        const urgent=isUrgent(start,end);
+        const urgentClass=urgent==="急件"?"urgent":(urgent==="否"?"not-urgent":"error");
+        tbody.innerHTML+=`
+          <tr>
+            <td>${escapeHtml(row["月份"]||"")}</td>
+            <td>${escapeHtml(proj)}</td>
+            <td>${escapeHtml(content)}</td>
+            <td>${escapeHtml(start)}</td>
+            <td>${escapeHtml(end)}</td>
+            <td class="${urgentClass}">${escapeHtml(urgent)}</td>
+          </tr>
+        `;
+      });
+      renderStats(month,filtered);
+    }
+
+    function renderStats(month, data){
+  const statsBox = document.getElementById("stats");
+  const list = document.getElementById("statsList");
+  document.getElementById("statsMonthText").innerText = `${month}`;
+  document.getElementById("statsCount").innerText = data.length;
+  list.innerHTML = "";
+  // 這裡統計的是「項目內容」或「說明」
+  const categories = [...new Set(data.map(d => (d["項目內容"] || d["內容"] || d["描述"] || "").trim()).filter(Boolean))];
+  categories.forEach(c => list.innerHTML += `<li>${escapeHtml(c)}</li>`);
+  statsBox.style.display = "block";
+}
+
+
+    function renderWeightStats(){
+      if(!allData.length) return;
+      const list=document.getElementById("weightList");
+      const statsBox=document.getElementById("weightStats");
+      list.innerHTML="";
+      const categoryCount={};
+      allData.forEach(d=>{
+        const cat=(d["項目"]||"").trim();
+        if(cat) categoryCount[cat]=(categoryCount[cat]||0)+1;
+      });
+      const total=Object.values(categoryCount).reduce((a,b)=>a+b,0);
+      Object.entries(categoryCount).sort((a,b)=>b[1]-a[1]).forEach(([cat,count])=>{
+        const percent=(total>0?((count/total)*100).toFixed(1):0);
+        list.innerHTML+=`<li>${escapeHtml(cat)}：${count}/${total} (${percent}%)</li>`;
+      });
+      statsBox.style.display="block";
+    }
+
+    document.getElementById("monthSelect").addEventListener("change",e=>{
+      if(e.target.value) renderTable(e.target.value);
+      else { document.getElementById("tableBody").innerHTML=""; document.getElementById("stats").style.display="none"; }
+    });
+
+    function escapeHtml(s){ if(s===null||s===undefined) return ""; return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;"); }
+
+    loadCSV();
+  </script>
+</body>
+</html>
